@@ -10,6 +10,7 @@ logging.basicConfig(format=log_format, level=logging.INFO)
 
 class Config:
     def __init__(self):
+        self.city_id = 0
         self.debug = False
         self.db_echo = False
         self.log_format = log_format
@@ -41,6 +42,7 @@ class Config:
 def load_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', help='config file name')
+    parser.add_argument('city_id', help='city id')
     args = parser.parse_args()
 
     config_name = args.config or 'config.json'
@@ -63,6 +65,7 @@ def load_config():
         sys.exit('# 错误: 配置文件载入失败: {}'.format(e))
 
     the_config = Config.load(config_dict)
+    the_config.city_id = args.city_id
 
     return the_config
 

@@ -4,14 +4,16 @@ from datetime import datetime, timedelta
 
 import requests
 
+import monkey
 import util
 from config import config
 from lian_jia import City, District, BizCircle, Community
 from util.orm import Session
 
-CITY_ID = 110000
 # 行政区名称 id 映射, 如: 海淀 -> 23008618
 DISTRICT_MAP = {}
+
+http_session = requests.session()
 
 
 def main():
@@ -23,7 +25,7 @@ def update_city():
     """
     初始化/更新城市信息
     """
-    logging.info('初始化/更新城市信息... city_id={}'.format(CITY_ID))
+    logging.info('初始化/更新城市信息... city_id={}'.format(config.city_id))
 
     city_info = get_city()
     city = City(city_info)
@@ -48,7 +50,7 @@ def update_city():
                     # biz_circle.district_id.append()、district_id += 等方式都不能更新表
                     biz_circle.district_id = biz_circle.district_id + [district.id]
             else:
-                biz_circle = BizCircle(district.id, biz_circle_info)
+                biz_circle = BizCircle(city.id, district.id, biz_circle_info)
                 db_session.add(biz_circle)
 
     db_session.commit()
@@ -64,11 +66,13 @@ def get_city():
     url = 'http://app.api.lianjia.com/config/config/initData'
 
     payload = {
-        'params': '{{"city_id":"{}","mobile_type":"android","version":"7.7.6"}}'.format(CITY_ID),
-        'fields': '{"mall_const":"e14628fb700583c1c3dc2f2a91cde0b7","xqf_filter":"aad6bacfa323f4dd3b85781dde6816cb","te_is_show":"fe2aab8915a6235c7549d6e3378d3092","city_info":"8433a68effe339dcecb19694de43d418","esf_filter":"2a3d06f861d98927ff4de4c4d459aff2","city_config_all":"db28b795dbf329d1a6d33fa747a6d6aa","nh_city_info":"ae756fcac2b4156b486bc2e54649cf48"}',
+        'params': '{{"city_id":"{}","mobile_type":"android","version":"7.7.6"}}'.format(config.city_id),
+        'fields': '{"mall_const":"3a37ab468ba938ab631dd12c96ee669b","xqf_filter":"aad6bacfa323f4dd3b85781dde6816cb","te_is_show":"fe2aab8915a6235c7549d6e3378d3092","city_info":"0645858a8750062e032c5ff091cfcf90","esf_filter":"599d5faf868320f13872ed430a02946b","city_config_all":"3bc739edacb2c88d11af7d290fb69764","nh_city_info":"5883d9625e4371301d2caca7e6232864"}'
+        # 'fields': '{"mall_const":"e14628fb700583c1c3dc2f2a91cde0b7","xqf_filter":"aad6bacfa323f4dd3b85781dde6816cb","te_is_show":"fe2aab8915a6235c7549d6e3378d3092","city_info":"8433a68effe339dcecb19694de43d418","esf_filter":"268e50e01af54659e5ba8f02fb8752a1","city_config_all":"3bc739edacb2c88d11af7d290fb69764","nh_city_info":"ae756fcac2b4156b486bc2e54649cf48"}'
+        # 'fields': '{"mall_const":"768aca6707c571eaed8c51fbd270b8ca","xqf_filter":"0671912d5266f4077a4addefbc373d37","te_is_show":"fe2aab8915a6235c7549d6e3378d3092","city_info":"b87fd4bdedac5e19e3316d0b7b3d5005","esf_filter":"d8eaf59c5797f002820022cde5d4d462","city_config_all":"3bc739edacb2c88d11af7d290fb69764","nh_city_info":"09183737abf7b3266dcf309b5c69f195"}'
     }
 
-    data = util.get_data(url, payload, 'POST')
+    data = util.get_data(url, payload, method='POST')
     return data['city_info']['info'][0]
 
 
@@ -83,6 +87,7 @@ def update_communities():
     db_session = Session()
 
     biz_circles = db_session.query(BizCircle).filter(
+        BizCircle.city_id == config.city_id,
         (BizCircle.communities_updated_at == None) |
         (BizCircle.communities_updated_at < deadline)
     ).all()
@@ -118,11 +123,11 @@ def get_communities_by_biz_circle(biz_circle_id):
             'bizcircle_id': biz_circle_id,
             'group_type': 'community',
             'limit_offset': offset,
-            'city_id': CITY_ID,
-            'limit_count': 100
+            'city_id': config.city_id,
+            'limit_count': 30
         }
 
-        data = util.get_data(url, params)
+        data = util.get_data(url, params, session=http_session)
 
         if data:
             communities['count'] = data['total_count']
@@ -136,6 +141,11 @@ def get_communities_by_biz_circle(biz_circle_id):
             # 存在没有数据的时候, 如: http://bj.lianjia.com/xiaoqu/huairouqita1/
             break
 
+    # 去重, 有时链家服务器抽风(或者本事数据就是错误的)... 返回的数据有重复的, 需要处理下
+    # 如: http://sh.lianjia.com/xiaoqu/hengshanlu/
+    d = {community['community_id']: community for community in communities['list']}
+    communities['list'] = d.values()
+
     return communities
 
 
@@ -145,12 +155,17 @@ def update_db(db_session, biz_circle, communities):
     """
     db_session.query(Community).filter(
         Community.biz_circle_id == biz_circle.id
-    ).delete(synchronize_session=False)
+    ).delete()
 
     for community_info in communities['list']:
-        district_id = DISTRICT_MAP[community_info['district_name']]
-        community = Community(CITY_ID, district_id, biz_circle.id, community_info)
-        db_session.add(community)
+        try:
+            district_id = DISTRICT_MAP[community_info['district_name']]
+            community = Community(biz_circle.city_id, district_id, biz_circle.id, community_info)
+            db_session.add(community)
+        except Exception as e:
+            # 返回的信息可能是错误的/不完整的, 如小区信息失效后返回的是不完整的信息
+            # 如: http://sz.lianjia.com/xiaoqu/2414168277659446
+            logging.error('错误: 小区 id: {}; 错误信息: {}'.format(community_info['community_id'], repr(e)))
 
     biz_circle.communities_count = communities['count']
     biz_circle.communities_updated_at = datetime.now()
@@ -179,4 +194,5 @@ if __name__ == '__main__':
     if config.debug and os.getenv('HTTPS_PROXY'):
         proxy_patch()
 
+    monkey.do_patch()
     main()

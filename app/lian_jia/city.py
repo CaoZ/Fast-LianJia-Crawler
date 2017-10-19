@@ -42,6 +42,7 @@ class BizCircle(AlchemyMixin, Base):
 
     id = Column(types.Integer, primary_key=True)
     # 一个商圈可能靠近多个行政区, 如: 西城区、东城区下都出现了安定门
+    city_id = Column(types.Integer, ForeignKey(City.id), nullable=False)
     district_id = Column(types.ARRAY(types.Integer, dimensions=1, as_tuple=True), nullable=False)
     name = Column(types.String, nullable=False)
     quan_pin = Column(types.String, nullable=False)
@@ -49,8 +50,9 @@ class BizCircle(AlchemyMixin, Base):
     updated_at = Column(types.DateTime, nullable=False, default=datetime.now)
     communities_updated_at = Column(types.DateTime)
 
-    def __init__(self, district_id, info):
+    def __init__(self, city_id, district_id, info):
         self.id = int(info['bizcircle_id'])
+        self.city_id = city_id
         self.district_id = [district_id]
         self.name = info['bizcircle_name']
         self.quan_pin = info['bizcircle_quanpin']

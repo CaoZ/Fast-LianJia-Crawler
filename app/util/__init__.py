@@ -7,7 +7,7 @@ import requests
 from config import config
 
 
-def get_data(url, payload, method='GET'):
+def get_data(url, payload, method='GET', session=None):
     payload['request_ts'] = int(time.time())
 
     headers = {
@@ -15,8 +15,14 @@ def get_data(url, payload, method='GET'):
         'Authorization': get_token(payload)
     }
 
-    func = requests.get if method == 'GET' else requests.post
-    r = func(url, payload, headers=headers)
+    if session:
+        if method == 'GET':
+            r = session.get(url, params=payload, headers=headers)
+        else:
+            r = session.post(url, data=payload, headers=headers)
+    else:
+        func = requests.get if method == 'GET' else requests.post
+        r = func(url, payload, headers=headers)
 
     return parse_data(r)
 

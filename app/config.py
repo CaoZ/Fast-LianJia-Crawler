@@ -42,7 +42,7 @@ class Config:
 def load_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', help='config file name')
-    parser.add_argument('city_id', help='city id')
+    parser.add_argument('city_id', help='city id', type=int, nargs='?', default=110000)
     args = parser.parse_args()
 
     config_name = args.config or 'config.json'

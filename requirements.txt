@@ -1,3 +1,4 @@
 requests
 sqlalchemy
 psycopg2
+pyquery

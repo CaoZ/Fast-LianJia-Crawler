@@ -7,6 +7,7 @@ from threading import Thread
 import requests
 
 from config import config
+from lian_jia.city import City
 from lian_jia.community import Community
 from util.orm import Session
 
@@ -20,12 +21,12 @@ _counts = {
 }
 
 
-def fetch_page(community_id):
+def fetch_page(city: City, community_id):
     """
     抓取小区详情页面并保存.
     :raise 若出现错误将抛出对应异常.
     """
-    url = f'https://m.lianjia.com/bj/xiaoqu/{community_id}/pinzhi'
+    url = f'https://m.lianjia.com/{city.abbr}/xiaoqu/{community_id}/pinzhi'
 
     r = requests.get(url)
     r.raise_for_status()
@@ -34,7 +35,7 @@ def fetch_page(community_id):
     save_file.write_bytes(r.content)
 
 
-def do_fetch(communities_queue: Queue):
+def do_fetch(city: City, communities_queue: Queue):
     # 抓取, 直到没东西可抓
 
     # http://docs.sqlalchemy.org/en/latest/orm/session_basics.html#is-the-session-thread-safe
@@ -45,7 +46,7 @@ def do_fetch(communities_queue: Queue):
         a_community = communities_queue.get()
 
         try:
-            fetch_page(a_community.id)
+            fetch_page(city, a_community.id)
             a_community.page_fetched_at = datetime.now()
         except Exception as e:
             _counts['failed'] += 1
@@ -69,6 +70,13 @@ def do_fetch(communities_queue: Queue):
 def fetch_all_pages(city_id, threads_num=10):
     db_session = Session()
 
+    city = db_session.query(City).filter(
+        City.id == city_id
+    ).first()
+
+    if not city:
+        return logging.error('请先获取目标城市信息后再进行抓取~')
+
     all_communities = db_session.query(Community).filter(
         Community.city_id == city_id,
         Community.page_fetched_at == None
@@ -83,11 +91,11 @@ def fetch_all_pages(city_id, threads_num=10):
 
     _counts['total'] = len(all_communities)
 
-    logging.info(f'city_id={city_id}, 待抓取={_counts["total"]}')
+    logging.info(f'city_id={city.id}, city_name={city.name}, 待抓取={_counts["total"]}')
     logging.info('抓取中...')
 
     for _ in range(threads_num):
-        worker = Thread(target=do_fetch, args=[communities_queue])
+        worker = Thread(target=do_fetch, args=[city, communities_queue])
         worker.start()
 
     communities_queue.join()
